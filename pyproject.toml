@@ -1,0 +1,29 @@
+[tool.poetry]
+name = "network-chat-room-agent"
+version = "0.1.0"
+description = "Agent framework for use with network-chat-room"
+authors = ["Christopher Carroll Smith <chriscarrollsmith@gmail.com>"]
+readme = "README.md"
+packages = [
+    { include = "agent", from = "." },
+    { include = "utils", from = "." },
+]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+python-dotenv = "^1.0.1"
+litellm = "^1.44.2"
+
+
+[tool.poetry.group.dev.dependencies]
+mypy = "^1.11.1"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.mypy]
+namespace_packages = true
+explicit_package_bases = true
+mypy_path = "."
+packages = ["agent", "utils"]
