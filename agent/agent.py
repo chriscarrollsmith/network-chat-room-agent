@@ -1,11 +1,11 @@
 import socket
-import random
 import time
 import threading
 import logging
 import tempfile
 import shutil
 import os
+import json
 from typing import Any, Literal, Callable, Optional
 from dotenv import load_dotenv
 from agent.api_caller import call_api
@@ -20,8 +20,10 @@ configure_logger()
 logger = logging.getLogger(__name__)
 
 # Get the Agent name from an environment variable with default "Clippy"
-load_dotenv()
-AGENT_NAME = os.environ.get("AGENT_NAME", "Clippy")
+load_dotenv(override=True)
+AGENT_USERNAME = os.environ.get("AGENT_USERNAME", "Clippy")
+AGENT_PASSWORD = os.environ.get("AGENT_PASSWORD", "password")
+ACCEPT_FILES = os.environ.get("ACCEPT_FILES", "false").lower() == "true"
 
 
 class Agent:
@@ -33,7 +35,6 @@ class Agent:
         self.socket = None
         self.connected = False
         self.receive_thread = None
-        self.stop_loop: bool = False
         self.event_handlers: dict[str, list[Callable]] = {
             "register_result": [self.handle_register_result],
             "login_result": [self.handle_login_result],
@@ -47,14 +48,14 @@ class Agent:
         self.temp_dir = tempfile.mkdtemp()
 
         # Authentication state
-        self.username = "User" + str(random.randint(1, 9))
-        self.password = "password"
+        self.username = AGENT_USERNAME
+        self.password = AGENT_PASSWORD
         self.registered = False
         self.authed = False
 
         # Chat session state
         self.current_session: str = ""
-        self.chat_log: list[tuple[str, str, str]] = []
+        self.chat_log: list[tuple[str, str]] = []
 
         # File transfer state
         self._filename: str = ""
@@ -63,7 +64,7 @@ class Agent:
 
     # --- Connection management ---
 
-    def validate_connection_state(self, should_be_connected: bool = True) -> None:
+    def _validate_connection_state(self, should_be_connected: bool = True) -> None:
         state: str = "connected" if should_be_connected else "disconnected"
         opposite_state: str = "disconnected" if should_be_connected else "connected"
 
@@ -107,10 +108,10 @@ class Agent:
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.socket.connect((self.host, self.port))
         self.connected = True
-        self.receive_thread = threading.Thread(target=self.receive_loop)
+        self.receive_thread = threading.Thread(target=self._receive_loop)
         self.receive_thread.start()
 
-        self.validate_connection_state(should_be_connected=True)
+        self._validate_connection_state(should_be_connected=True)
 
     # In the close method:
     def close(self) -> None:
@@ -118,7 +119,6 @@ class Agent:
         if self.socket:
             self.socket.close()
         if self.receive_thread:
-            self.stop_loop = True
             self.receive_thread.join(
                 timeout=5
             )  # Add a timeout to prevent indefinite waiting
@@ -131,12 +131,15 @@ class Agent:
         shutil.rmtree(self.temp_dir)
         logger.debug(f"Removed temporary directory: {self.temp_dir}")
 
-        self.validate_connection_state(should_be_connected=False)
+        self._validate_connection_state(should_be_connected=False)
 
     # --- State management ---
 
-    def append_message(self, sender: str, time: str, msg: str) -> None:
-        self.chat_log.append((sender, time, msg))
+    def append_message(self, sender: str, receiver: str, time: str, msg: str) -> None:
+        sender = "You" if sender == self.username else sender
+        receiver = "You" if receiver == self.username else receiver
+        header = f"{sender} (To {receiver}) - {time}"
+        self.chat_log.append((header, msg))
 
     def _reset_file_state(self) -> None:
         self._filename = ""
@@ -145,7 +148,7 @@ class Agent:
 
     # --- Outgoing server communication ---
 
-    def send(self, data_dict: dict[str, Any]) -> None:
+    def _send(self, data_dict: dict[str, Any]) -> None:
         if not self.connected or self.socket is None:
             raise ConnectionError("Lost connection to server")
 
@@ -158,12 +161,14 @@ class Agent:
         if not self.connected or self.socket is None:
             raise ConnectionError("Lost connection to the server.")
 
-        self.send({"command": type, "username": username, "password": password})
+        self._send({"command": type, "username": username, "password": password})
 
     def send_message(self, peer: str, message: str) -> None:
         try:
-            self.send({"command": "chat", "peer": peer, "message": message})
-            self.append_message(AGENT_NAME, time.strftime("%Y-%m-%d %H:%M:%S"), message)
+            self._send({"command": "chat", "peer": peer, "message": message})
+            self.append_message(
+                self.username, peer, time.strftime("%Y-%m-%d %H:%M:%S"), message
+            )
             logger.info(f"Replied to {peer}: {message}")
         except Exception as e:
             logger.error(f"Error sending message to {peer}: {str(e)}")
@@ -177,7 +182,7 @@ class Agent:
         size_str: str = format_file_size(size)
         md5_checksum: str = get_file_md5(filepath)
 
-        self.send(
+        self._send(
             {
                 "command": "file_request",
                 "peer": self.current_session,
@@ -212,30 +217,40 @@ class Agent:
 
     # --- Incoming server communication ---
 
-    def receive(self) -> dict[str, Any] | None:
+    def _receive(self) -> dict[str, Any] | None:
         if not self.connected or self.socket is None:
-            raise ConnectionError("Lost connection to server")
+            raise ConnectionError("Not connected to server")
+        try:
+            data: dict[str, Any] = receive(self.socket)
+            logger.debug(f"Decrypted data: {data}")
+            return data
+        except json.JSONDecodeError:
+            logger.error("Received invalid JSON data")
+            return None
+        except ConnectionError as e:
+            logger.error(f"Connection error: {e}")
+            self.close_connection()
+            return None
+        except Exception as e:
+            logger.error(f"Receive error: {str(e)}")
+            self.close_connection()
+            return None
 
-        return receive(self.socket)
-
-    def receive_loop(self):
-        logger.debug("Receive loop started")
-        while self.connected and not self.stop_loop:
-            try:
-                data: dict | None = self.receive()
-                if data:
-                    event: str = data.get("type", "unknown")
-                    handlers: list[Callable] = self.event_handlers.get(event, [])
+    def _receive_loop(self) -> None:
+        while self.connected:
+            data: dict | None = self._receive()
+            if data:
+                event: str = data.get("type", "unknown")
+                handlers: list[Callable] = self.event_handlers.get(event, [])
+                if not handlers:
+                    logger.debug(f"Ignored unhandled event: {data}")
+                else:
                     for handler in handlers:
                         handler(data)
-            except Exception as e:
-                logger.error(f"Error in receive loop: {str(e)}")
-                # Optionally, you might want to break the loop or set self.connected to False here
-                # depending on the nature of the error
-        self.stop_loop = False
-        logger.debug("Receive loop ended")
+            else:
+                logger.warning(f"Empty message received from server.")
 
-    def receive_file_data(self, filename: str) -> tuple[int, float]:
+    def _receive_file_data(self, filename: str) -> tuple[int, float]:
         total_bytes: int = 0
         file_path = os.path.join(self.temp_dir, filename)
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
@@ -294,7 +309,7 @@ class Agent:
         timestamp: str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
 
         # Append the message to the chat log
-        self.append_message(sender, timestamp, message)
+        self.append_message(sender, self.username, timestamp, message)
 
         # Log the received message
         logger.info(f"Message received from {sender} at {timestamp}: {message}")
@@ -310,22 +325,22 @@ class Agent:
         size = data.get("size", "Unknown")
         logger.info(f"File request received from {peer}: {filename} ({size} bytes)")
 
-        # For this automated agent, we'll always deny file transfers (change to "accept" to accept)
-        self.send({"command": "file_response", "peer": peer, "response": "deny"})
-        logger.info(f"Denied file transfer from {peer}")
+        if ACCEPT_FILES:
+            try:
+                total_bytes, transfer_time = self._receive_file_data(filename)
+                logger.info(
+                    f"File received: {total_bytes} bytes from {peer} in {transfer_time:.2f} seconds"
+                )
+            except Exception as e:
+                logger.error(f"Error receiving file: {str(e)}")
+        else:
+            self._send({"command": "file_response", "peer": peer, "response": "deny"})
+            logger.info(f"Denied file transfer from {peer}")
 
-        self.send_message(
-            peer,
-            f"Sorry, {peer}, you sent me a file transfer request, but I can't accept files yet.",
-        )
-
-        # try:
-        #     total_bytes, transfer_time = self.receive_file_data(filename)
-        #     logger.info(
-        #         f"File received: {total_bytes} bytes from {peer} in {transfer_time:.2f} seconds"
-        #     )
-        # except Exception as e:
-        #     logger.error(f"Error receiving file: {str(e)}")
+            self.send_message(
+                peer,
+                f"Sorry, {peer}; you sent me a file transfer request, but I can't accept files.",
+            )
 
     def handle_file_response(self, data: dict) -> None:
         response = data.get("response", "")
@@ -379,9 +394,12 @@ class Agent:
 
 if __name__ == "__main__":
     import os
+    from dotenv import load_dotenv
 
-    server_ip = os.environ.get("SERVER_IP", "127.0.0.1")
-    server_port = 8888
+    load_dotenv()
+
+    server_ip: str = os.environ.get("SERVER_IP", "127.0.0.1")
+    server_port: int = int(os.environ.get("SERVER_PORT", 8888))
 
     try:
         app = Agent(server_ip, server_port)
@@ -395,7 +413,7 @@ if __name__ == "__main__":
         while not app.authed:
             time.sleep(1)
 
-        app.send({"command": "message", "peer": "", "message": "Hello, world!"})
+        app.send_message("", "Hello!")
 
         while True:
             time.sleep(1)

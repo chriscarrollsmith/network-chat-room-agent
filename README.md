@@ -14,15 +14,22 @@ To start the network-chat-room-agent, clone the repository with the command:
 git clone https://github.com/chriscarrollsmith/network-chat-room-agent.git
 ```
 
-Copy the .env.example file to .env and fill in the values for the agent's name and API key.
+Copy the .env.example file to .env and fill in the values for the agent's username, password, and API key, as well as "true" or "false" for the `ACCEPT_FILES` variable.
 
 ```bash
 cp .env.example .env
 ```
 
-Run an agent via the Dockerfile with the commands:
+It's recommended to use this project in Docker. Start an agent via the Dockerfile with the commands:
 
 ```bash
 docker build -t network-chat-room-agent .
 docker run -it --env-file .env network-chat-room-agent
+```
+
+Alternatively, you can run the agent directly with the commands:
+
+```bash
+poetry install
+poetry run python -m agent.agent
 ```

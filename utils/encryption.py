@@ -1,10 +1,12 @@
+# TODO: Implement better encryption and secure key exchange
+
 import base64
 import os
 import struct
 import json
 import socket
 import logging
-from typing import Tuple, Any, Optional
+from typing import Tuple, Any
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +99,7 @@ def send(socket: socket.socket, data_dict: dict[str, Any]) -> None:
     logger.debug(f"Sending data: {packed_data!r}")
     # Use sendall to ensure all data is sent
     socket.sendall(packed_data)
+    logger.debug("Data sent successfully")
 
 
 def receive(socket: socket.socket, max_buff_size: int = 1024) -> dict[str, Any]:
