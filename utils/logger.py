@@ -3,10 +3,10 @@ import queue
 from logging.handlers import QueueHandler, QueueListener
 
 
-def configure_logger():
+def configure_logger(level: int | str = logging.INFO) -> None:
     # Configure the root logger
     root = logging.getLogger()
-    root.setLevel(logging.DEBUG)
+    root.setLevel(level)
 
     # Create handlers
     console_handler = logging.StreamHandler()

@@ -13,17 +13,18 @@ from utils.encryption import send, receive
 from utils.file_utilities import get_file_md5, format_file_size
 from utils.logger import configure_logger
 
-# Configure the logger for streaming logs from multiple threads
-configure_logger()
-
-# Get a logger for this module
-logger = logging.getLogger(__name__)
-
 # Get the Agent name from an environment variable with default "Clippy"
 load_dotenv(override=True)
 AGENT_USERNAME = os.environ.get("AGENT_USERNAME", "Clippy")
 AGENT_PASSWORD = os.environ.get("AGENT_PASSWORD", "password")
 ACCEPT_FILES = os.environ.get("ACCEPT_FILES", "false").lower() == "true"
+LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
+
+# Configure the logger for streaming logs from multiple threads
+configure_logger(LOG_LEVEL)
+
+# Get a logger for this module
+logger = logging.getLogger(__name__)
 
 
 class Agent:
@@ -104,7 +105,7 @@ class Agent:
                     f"Expected receive thread to not be alive but it was."
                 )
 
-    def connect(self):
+    def _connect(self):
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.socket.connect((self.host, self.port))
         self.connected = True
@@ -114,7 +115,7 @@ class Agent:
         self._validate_connection_state(should_be_connected=True)
 
     # In the close method:
-    def close(self) -> None:
+    def _close(self) -> None:
         self.connected = False
         if self.socket:
             self.socket.close()
@@ -403,7 +404,7 @@ if __name__ == "__main__":
 
     try:
         app = Agent(server_ip, server_port)
-        app.connect()
+        app._connect()
 
         app.authenticate("register")
         while not app.registered:
@@ -419,5 +420,5 @@ if __name__ == "__main__":
             time.sleep(1)
 
     finally:
-        app.close()
+        app._close()
         print("Agent closed")
