@@ -1,6 +1,5 @@
 venv
 .venv
 .env
-.env.*
 __pycache__
 .mypy_cache
