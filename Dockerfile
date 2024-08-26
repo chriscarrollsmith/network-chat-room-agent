@@ -1,5 +1,3 @@
-# TODO: Allow the user to specify to spin up server, client, or agent containers on different ports
-
 # Use Python 3.12 on Debian slim as base image
 FROM python:3.12-slim
 
@@ -20,6 +18,7 @@ COPY pyproject.toml poetry.lock ./
 # Copy necessary folders and files
 COPY utils /app/utils
 COPY agent /app/agent
+COPY .env /app/.env
 
 # Install dependencies
 RUN poetry config virtualenvs.create false \

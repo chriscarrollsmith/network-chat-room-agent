@@ -1,0 +1,13 @@
+services:
+  agent:
+    environment:
+      - SERVER_IP=server
+    build:
+      context: .
+      dockerfile: Dockerfile
+    networks:
+      - networkchatroom
+
+networks:
+  networkchatroom:
+    external: true
