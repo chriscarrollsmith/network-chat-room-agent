@@ -24,6 +24,12 @@ To start the network-chat-room-agent, clone the repository with the command:
 git clone https://github.com/chriscarrollsmith/network-chat-room-agent.git
 ```
 
+Navigate into the repository directory:
+
+```bash
+cd network-chat-room-agent
+```
+
 Copy the .env.example file to .env and fill in a valid OpenAI API key. (Or change models and provide a key for some other provider.)
 
 ```bash
